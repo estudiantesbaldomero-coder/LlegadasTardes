@@ -14,6 +14,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.29/jspdf.plugin.autotable.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 
 <style>
 body { padding:1rem; background:#f4f6f9; }
@@ -72,7 +73,7 @@ header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
             </select>
           </div>
           <ul id="todayStudents" class="list-group list-group-flush mt-2"></ul>
-          <button id="exportPDF" class="btn w-100 mt-2">Ver Resumen / Exportar PDF</button>
+          <button id="exportPDFBtn" class="btn w-100 mt-2">Resumen / Exportar PDF</button>
         </div>
       </div>
     </div>
@@ -83,7 +84,7 @@ header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
         <h5>Dashboard (tiempo real)</h5>
         <p>Total estudiantes: <strong id="totalStudents">0</strong></p>
         <p>Llegadas hoy (<span id="todayDate"></span>): <strong id="attToday">0</strong></p>
-        <p>Llegadas totales hoy: <strong id="attTotal">0</strong></p>
+        <p>Llegadas totales: <strong id="attTotal">0</strong></p>
         <canvas id="attendanceChart" style="width:100%; height:200px;"></canvas>
         <button id="clearData" class="btn btn-sm mt-2">Borrar toda la base (local)</button>
       </div>
@@ -91,43 +92,42 @@ header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
   </div>
 
   <div class="col-lg-8">
-    <div id="print-area" style="display:none;"></div>
-  </div>
-</div>
-</div>
-
-<!-- Modal Resumen -->
-<div class="modal fade" id="summaryModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Resumen de Llegadas Hoy</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <table class="table table-striped" id="summaryTable">
-          <thead>
-            <tr><th>N°</th><th>Nombre</th><th>Grado</th><th>Hora</th><th>Nota</th><th>Total Llegadas</th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <div class="modal-footer">
-        <button id="exportPDFBtn" class="btn btn-primary">Exportar PDF</button>
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+    <!-- Modal Resumen -->
+    <div class="modal fade" id="summaryModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Resumen de Llegadas Tardes - <span id="modalDate"></span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <table class="table table-bordered" id="summaryTable">
+              <thead class="table-light">
+                <tr><th>N°</th><th>Nombre</th><th>Grado</th><th>Hora</th><th>Nota</th><th>Total Llegadas</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="modal-footer">
+            <button type="button" id="exportTodayPDF" class="btn btn-success">Exportar PDF</button>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
+
+</div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 // ------------------- STORAGE -------------------
 const STORAGE_STUDENTS='rs_students_v2';
-const STORAGE_ATT='late_attendance_v7';
+const STORAGE_ATT='late_attendance_v2';
 function readStudents(){ return JSON.parse(localStorage.getItem(STORAGE_STUDENTS)||'[]'); }
 function readLateArrivals(){ return JSON.parse(localStorage.getItem(STORAGE_ATT)||'{}'); }
 function writeLateArrivals(obj){ localStorage.setItem(STORAGE_ATT,JSON.stringify(obj)); }
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 function todayKey(){ return new Date().toISOString().slice(0,10); }
 
 const totalStudentsEl=document.getElementById('totalStudents');
@@ -150,28 +150,20 @@ function registerLateArrival(name, grade, note){
   const students = readStudents();
   const student = students.find(s => s.name === name && s.grade === grade);
   if(!student) return 'notfound';
-
   const att = readLateArrivals();
   const key = todayKey();
-  if(!att[key]) att[key] = {};
-
+  if(!att[key]) att[key]={};
   if(att[key][student.id]) return 'alreadyToday';
-
-  att[key][student.id] = { time: new Date().toISOString(), note: note || '' };
+  att[key][student.id]={time:new Date().toISOString(), note:note||''};
   writeLateArrivals(att);
-
-  // Total de llegadas acumuladas
-  let totalLlegadas = 0;
-  Object.keys(att).forEach(day=>{
-    if(att[day][student.id]) totalLlegadas++;
-  });
-
-  // Aviso de 4 o más llegadas
-  if(totalLlegadas>=4){
-    speak(`Atención: ${student.name} ya tiene ${totalLlegadas} llegadas tarde. Se recomienda citar al acudiente.`);
-  }
-
   renderDashboard(); renderTodayList(); renderChart();
+
+  // ALERTA obligatoria si 4 o más llegadas acumuladas
+  let totalLlegadas = 0;
+  Object.keys(att).forEach(day=>{ if(att[day][student.id]) totalLlegadas++; });
+  if(totalLlegadas>=4){
+    speak(`Atención: ${student.name} tiene ${totalLlegadas} llegadas tarde. Se recomienda citar al acudiente`);
+  }
   return student.name;
 }
 
@@ -182,42 +174,34 @@ function renderDashboard(){
   const today=todayKey();
   totalStudentsEl.textContent=students.length;
   attTodayEl.textContent=att[today]?Object.keys(att[today]).length:0;
-  let total=0;
-  Object.keys(att).forEach(day=>{ total += Object.keys(att[day]).length; });
-  attTotalEl.textContent=total;
+  attTotalEl.textContent=Object.keys(att).reduce((sum,d)=>sum+Object.keys(att[d]).length,0);
 }
 
 // ------------------- Today list -------------------
 function renderTodayList(){
   const ul=document.getElementById('todayStudents'); ul.innerHTML='';
   const att=readLateArrivals(); 
-  const today=todayKey();
-  let index=1; let hasRecords=false;
+  const today=todayKey(); let index=1; let hasRecords=false;
   if(att[today]){
     Object.keys(att[today]).forEach(id=>{
-      const s = readStudents().find(st=>st.id===id);
-      if(s && (gradeFilter.value==='all'||s.grade===gradeFilter.value)){
-        const record = att[today][id];
-
-        // Total acumulado
+      const record=att[today][id];
+      const s=readStudents().find(st=>st.id===id);
+      if(s&&(gradeFilter.value==='all'||s.grade===gradeFilter.value)){
+        // Total llegadas acumuladas
         let totalLlegadas = 0;
-        Object.keys(att).forEach(day=>{
-          if(att[day][id]) totalLlegadas++;
-        });
-
-        const li = document.createElement('li');
+        Object.keys(att).forEach(day=>{ if(att[day][id]) totalLlegadas++; });
+        const li=document.createElement('li');
         li.className='list-group-item flash';
-        li.textContent = `${index}. ${s.name} - ${s.grade} (${record.note})`;
+        li.textContent=`${index}. ${s.name} - ${s.grade} (${record.note})`;
 
-        // ALERTA VISUAL si 4 o más llegadas
-        if(totalLlegadas >= 4){
-          li.style.backgroundColor = '#f8d7da';
-          li.style.fontWeight = 'bold';
-          li.title = `Atención: ${s.name} tiene ${totalLlegadas} llegadas tarde`;
+        // ALERTA visual si 4 o más llegadas
+        if(totalLlegadas>=4){
+          li.style.backgroundColor='#f8d7da';
+          li.style.fontWeight='bold';
+          li.title=`Atención: ${s.name} tiene ${totalLlegadas} llegadas tarde`;
         }
 
-        ul.appendChild(li);
-        index++; hasRecords=true;
+        ul.appendChild(li); index++; hasRecords=true;
         setTimeout(()=>li.classList.remove('flash'),400);
       }
     });
@@ -243,8 +227,7 @@ function renderChart(){
   const att=readLateArrivals();
   const data=last5.map(d=>{
     const dayKey=d.toISOString().slice(0,10);
-    if(!att[dayKey]) return 0;
-    return Object.keys(att[dayKey]).length;
+    return att[dayKey]?Object.keys(att[dayKey]).length:0;
   });
   if(attendanceChart) attendanceChart.destroy();
   attendanceChart=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Llegadas Tarde',data,backgroundColor:'#1976d2'}]}});
@@ -270,12 +253,7 @@ async function startScanner(){
     scanLoop();
   }catch(err){ alert('No se pudo acceder a la cámara: '+err.message); }
 }
-function stopScanner(){ 
-  scanning=false; 
-  if(videoStream){ videoStream.getTracks().forEach(t=>t.stop()); videoStream=null; } 
-  document.getElementById('scanner-area').style.display='none'; 
-  scanStatus.textContent=''; 
-}
+function stopScanner(){ scanning=false; if(videoStream){ videoStream.getTracks().forEach(t=>t.stop()); videoStream=null; } document.getElementById('scanner-area').style.display='none'; scanStatus.textContent=''; }
 video.addEventListener('loadedmetadata',()=>{ video.style.height=video.offsetWidth+'px'; });
 
 let lastScan=0;
@@ -292,28 +270,21 @@ function scanLoop(){
         lastScan=now; let parsed=null;
         try{ parsed=JSON.parse(code.data); }catch(e){ parsed=null; }
         if(parsed && parsed.name && parsed.grade){
-          const studentName = parsed.name;
-          const grade = parsed.grade;
-          const att = readLateArrivals();
-          const today = todayKey();
-          const students = readStudents();
-          const student = students.find(s=>s.name===studentName && s.grade===grade);
+          const studentName=parsed.name; const grade=parsed.grade;
+          const att=readLateArrivals(); const today=todayKey();
+          const students=readStudents();
+          const student=students.find(s=>s.name===studentName && s.grade===grade);
 
-          if(!student){
-            scanStatus.textContent='Estudiante no encontrado';
-            speak('Estudiante no encontrado');
-          } else if(att[today] && att[today][student.id]){
-            scanStatus.textContent='Estudiante ya registrado hoy';
-            speak('Ya registrado hoy');
-          } else {
-            scanStatus.textContent=`Detectado: ${studentName}`;
-            speak(`Detectado: ${studentName}`);
+          if(!student){ scanStatus.textContent='Estudiante no encontrado'; speak('Estudiante no encontrado'); }
+          else if(att[today] && att[today][student.id]){ scanStatus.textContent='Estudiante ya registrado hoy'; speak('Ya registrado hoy'); }
+          else{
+            scanStatus.textContent=`Detectado: ${studentName}`; speak(`Detectado: ${studentName}`);
             setTimeout(()=>{
-              const note = prompt(`Estudiante: ${studentName}\nIngrese anotación:`, '');
-              const res = registerLateArrival(studentName, grade, note);
+              const note=prompt(`Estudiante: ${studentName}\nIngrese anotación:`, '');
+              const res=registerLateArrival(studentName, grade, note);
               if(res==='notfound'){ scanStatus.textContent='Estudiante no encontrado'; speak('Estudiante no encontrado'); }
-              else { scanStatus.textContent=`Registrado: ${res}`; speak(`Estudiante registrado: ${res}`); }
-            }, 500);
+              else{ scanStatus.textContent=`Registrado: ${res}`; speak(`Estudiante registrado: ${res}`); }
+            },500);
           }
 
         } else { scanStatus.textContent='QR inválido'; speak('QR inválido'); }
@@ -326,102 +297,67 @@ function speak(text){ const u=new SpeechSynthesisUtterance(text); window.speechS
 
 // ------------------- Modal Resumen / Export PDF -------------------
 function showSummaryModal(){
-  const tbody = document.querySelector('#summaryTable tbody');
+  document.getElementById('modalDate').textContent=todayKey();
+  const tbody=document.querySelector('#summaryTable tbody');
   tbody.innerHTML='';
-  const att = readLateArrivals();
-  const today = todayKey();
-  const students = readStudents();
-  let index = 1;
-
+  const att=readLateArrivals();
+  const today=todayKey();
+  const students=readStudents();
+  let index=1;
   if(att[today]){
     Object.keys(att[today]).forEach(id=>{
-      const s = students.find(st=>st.id===id);
-      if(s && (gradeFilter.value==='all' || s.grade===gradeFilter.value)){
-        const record = att[today][id];
-
-        // Total de llegadas acumuladas
-        let totalLlegadas = 0;
-        Object.keys(att).forEach(day=>{
-          if(att[day][id]) totalLlegadas++;
-        });
-
-        const time = new Date(record.time).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${index++}</td><td>${s.name}</td><td>${s.grade}</td><td>${time}</td><td>${record.note}</td><td>${totalLlegadas}</td>`;
-
-        // ALERTA VISUAL si totalLlegadas >= 4
-        if(totalLlegadas >= 4){
-          tr.style.backgroundColor = '#f8d7da';
-          tr.style.fontWeight = 'bold';
-          tr.title = `Atención: ${s.name} tiene ${totalLlegadas} llegadas tarde`;
-        }
-
+      const s=students.find(st=>st.id===id);
+      if(s&&(gradeFilter.value==='all'||s.grade===gradeFilter.value)){
+        const record=att[today][id];
+        let totalLlegadas=0;
+        Object.keys(att).forEach(day=>{ if(att[day][id]) totalLlegadas++; });
+        const time=new Date(record.time).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${index++}</td><td>${s.name}</td><td>${s.grade}</td><td>${time}</td><td>${record.note}</td><td>${totalLlegadas}</td>`;
+        if(totalLlegadas>=4){ tr.style.backgroundColor='#f8d7da'; tr.style.fontWeight='bold'; tr.title=`Atención: ${s.name} tiene ${totalLlegadas} llegadas tarde`; }
         tbody.appendChild(tr);
       }
     });
   } else {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="6" class="text-center text-muted">No hay llegadas hoy</td>`;
-    tbody.appendChild(tr);
+    const tr=document.createElement('tr'); tr.innerHTML=`<td colspan="6" class="text-center text-muted">No hay llegadas hoy</td>`; tbody.appendChild(tr);
   }
-
-  const summaryModal = new bootstrap.Modal(document.getElementById('summaryModal'));
+  const summaryModal=new bootstrap.Modal(document.getElementById('summaryModal'));
   summaryModal.show();
 }
-document.getElementById('exportPDF').addEventListener('click', showSummaryModal);
+document.getElementById('exportPDFBtn').addEventListener('click', showSummaryModal);
 
 function exportTodayPDF(){
-  const att = readLateArrivals();
-  const today = todayKey();
+  const att=readLateArrivals();
+  const today=todayKey();
   if(!att[today]){ alert('No hay registros hoy'); return; }
-
-  const students = readStudents();
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  doc.setFontSize(14);
-  doc.text(`Llegadas Tarde - ${today}`, 14, 20);
-
-  const tableCol = ["N°","Nombre","Grado","Hora","Nota","Total Llegadas"];
-  const tableRows = [];
-  let index = 1;
-
+  const students=readStudents();
+  const { jsPDF }=window.jspdf;
+  const doc=new jsPDF();
+  doc.setFontSize(14); doc.text(`Llegadas Tarde - ${today}`,14,20);
+  const tableCol=["N°","Nombre","Grado","Hora","Nota","Total Llegadas"];
+  const tableRows=[]; let index=1;
   Object.keys(att[today]).forEach(id=>{
-    const s = students.find(st=>st.id===id);
-    if(s && (gradeFilter.value==='all' || s.grade===gradeFilter.value)){
-      const record = att[today][id];
-      let totalLlegadas = 0;
-      Object.keys(att).forEach(day=>{ if(att[day][id]) totalLlegadas++; });
-      const time = new Date(record.time).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
-      tableRows.push([index++, s.name, s.grade, time, record.note, totalLlegadas]);
+    const s=students.find(st=>st.id===id);
+    if(s&&(gradeFilter.value==='all'||s.grade===gradeFilter.value)){
+      const record=att[today][id];
+      let totalLlegadas=0; Object.keys(att).forEach(day=>{ if(att[day][id]) totalLlegadas++; });
+      const time=new Date(record.time).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+      tableRows.push([index++,s.name,s.grade,time,record.note,totalLlegadas]);
     }
   });
-
-  doc.autoTable({
-    head: [tableCol],
-    body: tableRows,
-    startY: 30,
-    styles: { cellPadding:2, fontSize:12, halign:'left', valign:'middle', lineColor:[0,0,0], lineWidth:0.5 },
-    headStyles: { fillColor:[200,200,200], textColor:[0,0,0], fontStyle:'bold' },
-    alternateRowStyles: { fillColor:[240,240,240] },
-    theme: 'grid'
-  });
-  doc.save(`LlegadasTardes_${today}.pdf`);
+  doc.autoTable({head:[tableCol],body:tableRows,startY:30,styles:{cellPadding:2,fontSize:12,halign:'left',valign:'middle'},theme:'grid'});
+  doc.save(`LlegadasTarde_${today}.pdf`);
 }
-document.getElementById('exportPDFBtn').addEventListener('click', exportTodayPDF);
+document.getElementById('exportTodayPDF').addEventListener('click', exportTodayPDF);
 
 // ------------------- Clear data -------------------
 document.getElementById('clearData').addEventListener('click',()=>{
-  if(confirm('Borrar registros de llegadas tarde?')){
-    localStorage.removeItem(STORAGE_ATT);
-    renderDashboard(); renderTodayList(); renderChart();
-  }
+  if(confirm('Borrar registros de llegadas tarde?')){ localStorage.removeItem(STORAGE_ATT); renderDashboard(); renderTodayList(); renderChart(); }
 });
 
 // ------------------- Demo init -------------------
 updateGradeFilter(); renderDashboard(); renderTodayList(); renderChart();
 </script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-
-
-
