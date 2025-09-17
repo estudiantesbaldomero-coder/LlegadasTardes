@@ -17,6 +17,7 @@
 
 <style>
 body { padding:1rem; background:#f4f6f9; }
+
 /* Encabezado */
 header { display:flex; align-items:center; justify-content:center; background: linear-gradient(90deg,#d32f2f,#1976d2,#388e3c); padding:12px 20px; border-radius:10px; margin-bottom:1rem; color:white; box-shadow:0 3px 6px rgba(0,0,0,0.2); }
 header img { height:65px; margin-right:15px; }
@@ -42,12 +43,16 @@ header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
 .label .label-name { margin-top:6px; font-size:13px; text-align:center; color:#d32f2f; font-weight:bold; }
 
 /* Botones */
-#importBtn, #toggleManualForm { background-color:#388e3c; color:white; font-weight:bold; }
-#printAll, #addManualStudent, #exportPDF { background-color:#1976d2; color:white; font-weight:bold; }
-#clearData { background-color:#d32f2f; color:white; }
+#startScanner, #stopScanner { border-width:2px; font-weight:bold; margin-bottom:0.5rem; }
+#startScanner { border-color:#1976d2; color:#1976d2; }
+#stopScanner { border-color:#d32f2f; color:#d32f2f; }
+#exportPDF { background:black; color:white; font-weight:bold; margin-top:0.5rem; }
 
-/* Manual Student Form */
-#manualStudentForm { border:2px solid #388e3c; padding:10px; border-radius:8px; background:#fff; display:none; margin-bottom:1rem; }
+/* Dashboard */
+.card.border-dashboard { border:3px solid #d32f2f; }
+
+/* Manual annotations form */
+#annotationForm { border:2px solid #388e3c; padding:10px; border-radius:8px; background:#fff; display:none; margin-top:10px; }
 </style>
 </head>
 
@@ -64,49 +69,39 @@ header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
 <div class="container">
   <div class="row g-3">
     <div class="col-lg-4">
-      <!-- Escáner QR -->
       <div class="card mb-3">
         <div class="card-body">
           <h5>Escáner QR</h5>
-          <div id="scanner-controls" class="mb-2">
-            <button id="startScanner" class="btn w-100 mb-1">Iniciar escáner</button>
-            <button id="stopScanner" class="btn w-100 mb-1">Detener escáner</button>
-          </div>
+          <button id="startScanner" class="btn w-100">Iniciar escáner</button>
+          <button id="stopScanner" class="btn w-100">Detener escáner</button>
+
           <div id="scanner-area" style="display:none;">
             <video id="video" autoplay playsinline></video>
             <canvas id="canvas" style="display:none;"></canvas>
             <small id="scanStatus" class="text-success"></small>
-            <ul id="todayTardies" class="list-group list-group-flush mt-2"></ul>
+
+            <div class="mt-2">
+              <label for="gradeFilter" class="form-label">Filtrar por grado:</label>
+              <select id="gradeFilter" class="form-select">
+                <option value="all">Todos los grados</option>
+              </select>
+            </div>
+
+            <ul id="todayStudents" class="list-group list-group-flush mt-2"></ul>
+            <button id="exportPDF" class="btn w-100">Exportar PDF</button>
           </div>
         </div>
       </div>
 
-      <!-- Manual Student -->
-      <div class="card mb-3">
-        <div class="card-body">
-          <h5>Agregar estudiante manualmente</h5>
-          <button id="toggleManualForm" class="btn w-100 mb-2">Mostrar / Ocultar formulario</button>
-          <div id="manualStudentForm">
-            <input type="text" id="manualName" placeholder="Nombre completo" class="form-control mb-1">
-            <input type="text" id="manualGrade" placeholder="Grado (ej. 10-3)" class="form-control mb-1">
-            <button id="addManualStudent" class="btn w-100">Agregar</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Dashboard -->
-      <div class="card mb-3 border-danger">
+      <div class="card mb-3 border-dashboard">
         <div class="card-body">
           <h5>Dashboard (tiempo real)</h5>
-          <p>Total estudiantes: <strong id="totalStudents">0</strong></p>
-          <p>Llegadas tarde hoy (<span id="todayDate"></span>): <strong id="tardiesToday">0</strong></p>
-          <p>Llegadas tarde acumuladas: <strong id="tardiesTotal">0</strong></p>
-          <canvas id="tardiesChart" style="width:100%; height:200px;"></canvas>
-          <button id="clearData" class="btn btn-sm mt-2">Borrar toda la base (local)</button>
+          <p>Total estudiantes registrados hoy: <strong id="totalStudents">0</strong></p>
+          <canvas id="attendanceChart" style="width:100%; height:200px;"></canvas>
         </div>
       </div>
-    </div>
 
+    </div>
     <div class="col-lg-8">
       <div id="print-area" style="display:none;"></div>
     </div>
@@ -116,61 +111,90 @@ header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
 <script>
 // ------------------- STORAGE -------------------
 const STORAGE_STUDENTS='rs_students_v2';
-const STORAGE_TARDIES='rs_tardies_v1';
+const STORAGE_ATT='rs_llegadas_v1';
 function readStudents(){ return JSON.parse(localStorage.getItem(STORAGE_STUDENTS)||'[]'); }
 function writeStudents(arr){ localStorage.setItem(STORAGE_STUDENTS,JSON.stringify(arr)); }
-function readTardies(){ return JSON.parse(localStorage.getItem(STORAGE_TARDIES)||'{}'); }
-function writeTardies(obj){ localStorage.setItem(STORAGE_TARDIES,JSON.stringify(obj)); }
+function readAttendance(){ return JSON.parse(localStorage.getItem(STORAGE_ATT)||'{}'); }
+function writeAttendance(obj){ localStorage.setItem(STORAGE_ATT,JSON.stringify(obj)); }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 function todayKey(){ return new Date().toISOString().slice(0,10); }
 
 const totalStudentsEl=document.getElementById('totalStudents');
-const tardiesTodayEl=document.getElementById('tardiesToday');
-const tardiesTotalEl=document.getElementById('tardiesTotal');
-document.getElementById('todayDate').textContent=todayKey();
+const gradeFilter=document.getElementById('gradeFilter');
 
-// ------------------- Dashboard -------------------
-function renderDashboard(){
+// ------------------- Filter -------------------
+function updateGradeFilter(){
   const students=readStudents();
-  const tardies=readTardies();
-  const today=todayKey();
-  totalStudentsEl.textContent=students.length;
-  tardiesTodayEl.textContent=tardies[today]?Object.keys(tardies[today]).length:0;
-  tardiesTotalEl.textContent=Object.values(tardies).reduce((sum,obj)=>sum+Object.keys(obj).length,0);
+  const unique=[...new Set(students.map(s=>s.grade))].sort();
+  gradeFilter.innerHTML='<option value="all">Todos los grados</option>';
+  unique.forEach(g=>{ const opt=document.createElement('option'); opt.value=g; opt.textContent=g; gradeFilter.appendChild(opt); });
+}
+gradeFilter.addEventListener('change',renderTodayList);
+
+// ------------------- Attendance -------------------
+function registerAttendanceQR(name, grade){
+  const students=readStudents();
+  const student=students.find(s=>s.name===name && s.grade===grade);
+  if(!student) return 'notfound';
+  const att=readAttendance(); const key=todayKey();
+  if(!att[key]) att[key]={};
+  if(!att[key][student.id]) att[key][student.id]=[];
+  // Pedir anotación
+  const note=prompt(`Registrar llegada tarde para:\n${name} - ${grade}\n\nAnotación (opcional):`);
+  att[key][student.id].push({time:new Date().toISOString(), note});
+  writeAttendance(att);
+  renderTodayList();
+  renderChart();
+  // Verificar si acumula 4 o más tardanzas
+  if(att[key][student.id].length>=4){
+    speak(`Este estudiante necesita que se le cite acudiente. Ya lleva ${att[key][student.id].length} llegadas tardes`);
+  }
+  return student.name;
 }
 
-// ------------------- List today -------------------
+// ------------------- Today list -------------------
 function renderTodayList(){
-  const tardies=readTardies();
+  const att=readAttendance();
   const today=todayKey();
-  const ul=document.getElementById('todayTardies'); ul.innerHTML='';
-  if(tardies[today]){
+  const ul=document.getElementById('todayStudents'); ul.innerHTML='';
+  if(att[today]){
     const students=readStudents(); let index=1;
-    Object.keys(tardies[today]).forEach(id=>{
+    Object.keys(att[today]).forEach(id=>{
       const s=students.find(st=>st.id===id);
-      if(s){
+      if(s&&(gradeFilter.value==='all'||gradeFilter.value===s.grade)){
         const li=document.createElement('li');
         li.className='list-group-item flash';
-        li.textContent=`${index}. ${s.name} - ${s.grade} (${tardies[today][id].note||''})`;
+        const count=att[today][id].length;
+        li.textContent=`${index}. ${s.name} - ${s.grade} (Tardanzas: ${count})`;
         ul.appendChild(li); index++;
         setTimeout(()=>li.classList.remove('flash'),400);
       }
     });
   }
+  totalStudentsEl.textContent=Object.keys(att[today]||{}).length;
 }
 
-// ------------------- Add manual student -------------------
-document.getElementById('toggleManualForm').addEventListener('click',()=>{
-  const f=document.getElementById('manualStudentForm');
-  f.style.display=(f.style.display==='none')?'block':'none';
-});
-document.getElementById('addManualStudent').addEventListener('click',()=>{
-  const name=document.getElementById('manualName').value.trim();
-  const grade=document.getElementById('manualGrade').value.trim();
-  if(!name||!grade){ alert('Ingrese nombre y grado'); return; }
-  const arr=readStudents(); const newS={id:uid(), name, grade, createdAt:new Date().toISOString()}; arr.push(newS); writeStudents(arr);
-  renderDashboard(); renderTodayList(); document.getElementById('manualName').value=''; document.getElementById('manualGrade').value='';
-});
+// ------------------- Chart -------------------
+const ctx=document.getElementById('attendanceChart').getContext('2d');
+let attendanceChart=null;
+function renderChart(){
+  const last5=[...Array(5)].map((_,i)=>new Date(Date.now()-i*24*60*60*1000)).reverse();
+  const labels=last5.map(d=>d.toLocaleDateString('es-ES',{weekday:'short',day:'2-digit'}));
+  const att=readAttendance();
+  const students=readStudents();
+  const data=last5.map(d=>{
+    const key=d.toISOString().slice(0,10);
+    if(!att[key]) return 0;
+    if(gradeFilter.value==='all') return Object.keys(att[key]).length;
+    else return Object.keys(att[key]).filter(id=>{
+      const s=students.find(st=>st.id===id);
+      return s && s.grade===gradeFilter.value;
+    }).length;
+  });
+  if(attendanceChart) attendanceChart.destroy();
+  attendanceChart=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Llegadas tardes',data,backgroundColor:'#1976d2'}]}});
+}
+renderChart();
 
 // ------------------- Scanner -------------------
 let videoStream=null, scanning=false;
@@ -207,7 +231,9 @@ function scanLoop(){
         lastScan=now; let parsed=null;
         try{ parsed=JSON.parse(code.data); }catch(e){ parsed=null; }
         if(parsed && parsed.name && parsed.grade){
-          registerTardy(parsed.name, parsed.grade);
+          const res=registerAttendanceQR(parsed.name, parsed.grade);
+          if(res==='notfound'){ scanStatus.textContent='Estudiante no encontrado'; speak('Estudiante no encontrado'); }
+          else{ scanStatus.textContent=`Registrado: ${res}`; speak(`Estudiante registrado: ${res}`); }
         } else { scanStatus.textContent='QR inválido'; speak('QR inválido'); }
       }
     } else { scanStatus.textContent='Buscando QR...'; }
@@ -215,51 +241,6 @@ function scanLoop(){
   requestAnimationFrame(scanLoop);
 }
 function speak(text){ const u=new SpeechSynthesisUtterance(text); window.speechSynthesis.speak(u); }
-
-// ------------------- Register Tardy -------------------
-function registerTardy(name, grade){
-  const students=readStudents();
-  const student=students.find(s=>s.name===name && s.grade===grade);
-  if(!student){ scanStatus.textContent='Estudiante no encontrado'; speak('Estudiante no encontrado'); return; }
-  const tardies=readTardies(); const key=todayKey();
-  if(!tardies[key]) tardies[key]={};
-  if(tardies[key][student.id]){ scanStatus.textContent='Ya registrado'; speak('Estudiante ya registrado'); return; }
-  const note=prompt('Ingrese alguna anotación (opcional)') || '';
-  tardies[key][student.id]={timestamp:new Date().toISOString(), note};
-  writeTardies(tardies);
-  scanStatus.textContent=`Registrado: ${student.name}`;
-  speak(`Estudiante registrado: ${student.name}`);
-  renderDashboard(); renderTodayList();
-  // Verificar acumuladas
-  const monthlyCount=countStudentTardiesMonth(student.id);
-  if(monthlyCount>=4){
-    speak(`Este estudiante necesita que se le cite acudiente, ya lleva ${monthlyCount} llegadas tarde`);
-    alert(`Este estudiante necesita que se le cite acudiente, ya lleva ${monthlyCount} llegadas tarde`);
-  }
-}
-
-// ------------------- Count monthly tardies -------------------
-function countStudentTardiesMonth(studentId){
-  const tardies=readTardies();
-  const now=new Date();
-  const monthKey=(d)=>d.slice(0,7); // YYYY-MM
-  let count=0;
-  for(const day in tardies){
-    if(monthKey(day)===monthKey(now.toISOString())){
-      if(tardies[day][studentId]) count++;
-    }
-  }
-  return count;
-}
-
-// ------------------- Clear data -------------------
-document.getElementById('clearData').addEventListener('click',()=>{
-  if(confirm('Borrar estudiantes y registros de llegadas tarde?')){
-    localStorage.removeItem(STORAGE_STUDENTS);
-    localStorage.removeItem(STORAGE_TARDIES);
-    renderDashboard(); renderTodayList();
-  }
-});
 
 // ------------------- Demo students -------------------
 if(readStudents().length===0){
@@ -270,9 +251,8 @@ if(readStudents().length===0){
     {id:uid(),name:'Ana Morales',grade:'10-2',createdAt:new Date().toISOString()}
   ]; writeStudents(sample);
 }
-
-renderDashboard();
-renderTodayList();
+updateGradeFilter(); renderTodayList(); renderChart();
 </script>
 </body>
 </html>
+
