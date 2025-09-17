@@ -99,10 +99,10 @@ header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
 <script>
 // ------------------- STORAGE -------------------
 const STORAGE_STUDENTS='rs_students_v2';
-const STORAGE_ATT='late_attendance_v1';
+const STORAGE_ATT='late_attendance_v2';
 function readStudents(){ return JSON.parse(localStorage.getItem(STORAGE_STUDENTS)||'[]'); }
-function readAttendance(){ return JSON.parse(localStorage.getItem(STORAGE_ATT)||'{}'); }
-function writeAttendance(obj){ localStorage.setItem(STORAGE_ATT,JSON.stringify(obj)); }
+function readLateArrivals(){ return JSON.parse(localStorage.getItem(STORAGE_ATT)||'{}'); }
+function writeLateArrivals(obj){ localStorage.setItem(STORAGE_ATT,JSON.stringify(obj)); }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 function todayKey(){ return new Date().toISOString().slice(0,10); }
 
@@ -121,59 +121,51 @@ function updateGradeFilter(){
 }
 gradeFilter.addEventListener('change',()=>{ renderTodayList(); renderChart(); });
 
-// ------------------- Attendance -------------------
-function registerLateAttendanceQR(name, grade){
-  const students=readStudents();
-  const student=students.find(s=>s.name===name && s.grade===grade);
+// ------------------- Register Late Arrival -------------------
+function registerLateArrival(name, grade, note){
+  const students = readStudents();
+  const student = students.find(s => s.name === name && s.grade === grade);
   if(!student) return 'notfound';
-  const att=readAttendance(); 
-  const monthKey=new Date().toISOString().slice(0,7); // YYYY-MM
-  if(!att[monthKey]) att[monthKey]={};
-  if(!att[monthKey][student.id]) att[monthKey][student.id]=[];
-  if(att[monthKey][student.id].length>=0){
-    const note=prompt(`Estudiante: ${student.name}\nIngrese anotación:`,'');
-    att[monthKey][student.id].push({timestamp:new Date().toISOString(), note});
-    writeAttendance(att);
-    renderDashboard(); renderTodayList(); renderChart();
-    if(att[monthKey][student.id].length>=4){
-      speak(`Este estudiante necesita que se le cite acudiente, ya lleva ${att[monthKey][student.id].length} llegadas tardes`);
-    }
-    return student.name;
-  }
+
+  const att = readLateArrivals();
+  const key = todayKey();
+  if(!att[key]) att[key] = {};
+
+  if(att[key][student.id]) return 'alreadyToday'; // Ya registrado hoy
+
+  att[key][student.id] = { time: new Date().toISOString(), note: note || '' };
+  writeLateArrivals(att);
+  renderDashboard(); renderTodayList(); renderChart();
+  return student.name;
 }
 
 // ------------------- Dashboard -------------------
 function renderDashboard(){
   const students=readStudents();
-  const att=readAttendance(); 
+  const att=readLateArrivals();
   const today=todayKey();
-  const monthKey=today.slice(0,7);
   totalStudentsEl.textContent=students.length;
-  attTodayEl.textContent=att[monthKey]?Object.values(att[monthKey]).reduce((sum,a)=>sum+a.length,0):0;
-  attTotalEl.textContent=att[monthKey]?Object.values(att[monthKey]).reduce((sum,a)=>sum+a.length,0):0;
+  attTodayEl.textContent=att[today]?Object.keys(att[today]).length:0;
+  attTotalEl.textContent=att[today]?Object.keys(att[today]).length:0;
 }
 
 // ------------------- Today list -------------------
 function renderTodayList(){
   const ul=document.getElementById('todayStudents'); ul.innerHTML='';
-  const att=readAttendance(); 
+  const att=readLateArrivals();
   const today=todayKey();
-  const monthKey=today.slice(0,7);
-  if(att[monthKey]){
+  if(att[today]){
     let index=1;
-    Object.keys(att[monthKey]).forEach(id=>{
-      const records=att[monthKey][id].filter(r=>r.timestamp.slice(0,10)===today);
-      if(records.length>0){
-        const s=readStudents().find(st=>st.id===id);
-        if(s&&(gradeFilter.value==='all'||gradeFilter.value===s.grade)){
-          records.forEach(rec=>{
-            const li=document.createElement('li');
-            li.className='list-group-item flash';
-            li.textContent=`${index}. ${s.name} - ${s.grade} (${rec.note})`;
-            ul.appendChild(li); index++;
-            setTimeout(()=>li.classList.remove('flash'),400);
-          });
-        }
+    Object.keys(att[today]).forEach(id=>{
+      const s=readStudents().find(st=>st.id===id);
+      if(s&&(gradeFilter.value==='all'||s.grade===gradeFilter.value)){
+        const record=att[today][id];
+        const li=document.createElement('li');
+        li.className='list-group-item flash';
+        const time = new Date(record.time).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+        li.textContent=`${index}. ${s.name} - ${s.grade} (${record.note}) [${time}]`;
+        ul.appendChild(li); index++;
+        setTimeout(()=>li.classList.remove('flash'),400);
       }
     });
   }
@@ -194,13 +186,11 @@ function getLast5Workdays(){
 function renderChart(){
   const last5=getLast5Workdays();
   const labels=last5.map(d=>d.toLocaleDateString('es-ES',{weekday:'short',day:'2-digit'}));
-  const att=readAttendance();
-  const students=readStudents();
-  const monthKey=new Date().toISOString().slice(0,7);
+  const att=readLateArrivals();
   const data=last5.map(d=>{
     const dayKey=d.toISOString().slice(0,10);
-    if(!att[monthKey]) return 0;
-    return Object.values(att[monthKey]).reduce((sum,a)=>sum+a.filter(r=>r.timestamp.slice(0,10)===dayKey).length,0);
+    if(!att[dayKey]) return 0;
+    return Object.keys(att[dayKey]).length;
   });
   if(attendanceChart) attendanceChart.destroy();
   attendanceChart=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Llegadas Tarde',data,backgroundColor:'#1976d2'}]}});
@@ -241,8 +231,10 @@ function scanLoop(){
         lastScan=now; let parsed=null;
         try{ parsed=JSON.parse(code.data); }catch(e){ parsed=null; }
         if(parsed && parsed.name && parsed.grade){
-          const res=registerLateAttendanceQR(parsed.name, parsed.grade);
+          const note=prompt(`Estudiante: ${parsed.name}\nIngrese anotación:`, '');
+          const res=registerLateArrival(parsed.name, parsed.grade, note);
           if(res==='notfound'){ scanStatus.textContent='Estudiante no encontrado'; speak('Estudiante no encontrado'); }
+          else if(res==='alreadyToday'){ scanStatus.textContent='Estudiante ya registrado hoy'; speak('Ya registrado hoy'); }
           else{ scanStatus.textContent=`Registrado: ${res}`; speak(`Estudiante registrado: ${res}`); }
         } else { scanStatus.textContent='QR inválido'; speak('QR inválido'); }
       }
@@ -253,29 +245,40 @@ function scanLoop(){
 function speak(text){ const u=new SpeechSynthesisUtterance(text); window.speechSynthesis.speak(u); }
 
 // ------------------- Export PDF -------------------
-document.getElementById('exportPDF').addEventListener('click',()=>{
-  const att=readAttendance();
-  const monthKey=new Date().toISOString().slice(0,7);
-  if(!att[monthKey]){ alert('No hay registros este mes'); return; }
-  const students=readStudents();
+document.getElementById('exportPDF').addEventListener('click', ()=>{
+  const att = readLateArrivals();
+  const today = todayKey();
+  if(!att[today]) { alert('No hay registros hoy'); return; }
+
+  const students = readStudents();
   const { jsPDF } = window.jspdf;
-  const doc=new jsPDF();
+  const doc = new jsPDF();
   doc.setFontSize(14);
-  doc.text(`Llegadas Tarde - ${monthKey}`,14,20);
-  const tableCol=["N°","Nombre","Grado","Fecha","Anotación"];
-  const tableRows=[];
-  let index=1;
-  Object.keys(att[monthKey]).forEach(id=>{
-    const s=students.find(st=>st.id===id);
-    if(s){
-      att[monthKey][id].forEach(r=>{
-        const dateReg=new Date(r.timestamp).toLocaleDateString('es-ES',{day:'2-digit', month:'long', year:'numeric'});
-        tableRows.push([index++, s.name, s.grade, dateReg, r.note]);
-      });
+  doc.text(`Llegadas Tardes - ${today}`, 14, 20);
+
+  const tableCol = ["N°","Nombre","Grado","Hora","Nota"];
+  const tableRows = [];
+  let index = 1;
+
+  Object.keys(att[today]).forEach(id => {
+    const s = students.find(st => st.id === id);
+    if(s && (gradeFilter.value==='all' || s.grade === gradeFilter.value)){
+      const record = att[today][id];
+      const time = new Date(record.time).toLocaleTimeString('es-ES', {hour:'2-digit',minute:'2-digit'});
+      tableRows.push([index++, s.name, s.grade, time, record.note]);
     }
   });
-  doc.autoTable({head:[tableCol],body:tableRows,startY:30,styles:{cellPadding:2,fontSize:12,halign:'left',valign:'middle'},theme:'grid'});
-  doc.save(`LlegadasTarde_${monthKey}.pdf`);
+
+  doc.autoTable({
+    head: [tableCol],
+    body: tableRows,
+    startY: 30,
+    styles: { cellPadding:2, fontSize:12, halign:'left', valign:'middle', lineColor:[0,0,0], lineWidth:0.5 },
+    headStyles: { fillColor:[200,200,200], textColor:[0,0,0], fontStyle:'bold' },
+    alternateRowStyles: { fillColor:[240,240,240] },
+    theme: 'grid'
+  });
+  doc.save(`LlegadasTardes_${today}.pdf`);
 });
 
 // ------------------- Clear data -------------------
@@ -288,7 +291,3 @@ updateGradeFilter(); renderDashboard(); renderTodayList(); renderChart();
 </script>
 </body>
 </html>
-
-
-
-
