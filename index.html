@@ -83,7 +83,7 @@ header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
         <h5>Dashboard (tiempo real)</h5>
         <p>Total estudiantes: <strong id="totalStudents">0</strong></p>
         <p>Llegadas hoy (<span id="todayDate"></span>): <strong id="attToday">0</strong></p>
-        <p>Llegadas totales: <strong id="attTotal">0</strong></p>
+        <p>Llegadas totales hoy: <strong id="attTotal">0</strong></p>
         <canvas id="attendanceChart" style="width:100%; height:200px;"></canvas>
         <button id="clearData" class="btn btn-sm mt-2">Borrar toda la base (local)</button>
       </div>
@@ -107,7 +107,7 @@ header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
       <div class="modal-body">
         <table class="table table-striped" id="summaryTable">
           <thead>
-            <tr><th>N°</th><th>Nombre</th><th>Grado</th><th>Hora</th><th>Nota</th></tr>
+            <tr><th>N°</th><th>Nombre</th><th>Grado</th><th>Hora</th><th>Nota</th><th>Total Llegadas</th></tr>
           </thead>
           <tbody></tbody>
         </table>
@@ -124,7 +124,7 @@ header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
 <script>
 // ------------------- STORAGE -------------------
 const STORAGE_STUDENTS='rs_students_v2';
-const STORAGE_ATT='late_attendance_v5';
+const STORAGE_ATT='late_attendance_v7';
 function readStudents(){ return JSON.parse(localStorage.getItem(STORAGE_STUDENTS)||'[]'); }
 function readLateArrivals(){ return JSON.parse(localStorage.getItem(STORAGE_ATT)||'{}'); }
 function writeLateArrivals(obj){ localStorage.setItem(STORAGE_ATT,JSON.stringify(obj)); }
@@ -155,10 +155,22 @@ function registerLateArrival(name, grade, note){
   const key = todayKey();
   if(!att[key]) att[key] = {};
 
-  if(att[key][student.id]) return 'alreadyToday'; // <-- evita duplicados
+  if(att[key][student.id]) return 'alreadyToday';
 
   att[key][student.id] = { time: new Date().toISOString(), note: note || '' };
   writeLateArrivals(att);
+
+  // Total de llegadas acumuladas
+  let totalLlegadas = 0;
+  Object.keys(att).forEach(day=>{
+    if(att[day][student.id]) totalLlegadas++;
+  });
+
+  // Aviso de 4 o más llegadas
+  if(totalLlegadas>=4){
+    speak(`Atención: ${student.name} ya tiene ${totalLlegadas} llegadas tarde. Se recomienda citar al acudiente.`);
+  }
+
   renderDashboard(); renderTodayList(); renderChart();
   return student.name;
 }
@@ -170,26 +182,40 @@ function renderDashboard(){
   const today=todayKey();
   totalStudentsEl.textContent=students.length;
   attTodayEl.textContent=att[today]?Object.keys(att[today]).length:0;
-  attTotalEl.textContent=att[today]?Object.keys(att[today]).length:0;
+  let total=0;
+  Object.keys(att).forEach(day=>{ total += Object.keys(att[day]).length; });
+  attTotalEl.textContent=total;
 }
 
 // ------------------- Today list -------------------
 function renderTodayList(){
-  const ul=document.getElementById('todayStudents'); 
-  ul.innerHTML='';
-  const att=readLateArrivals();
+  const ul=document.getElementById('todayStudents'); ul.innerHTML='';
+  const att=readLateArrivals(); 
   const today=todayKey();
-  let hasRecords=false;
-
+  let index=1; let hasRecords=false;
   if(att[today]){
-    let index=1;
     Object.keys(att[today]).forEach(id=>{
-      const record=att[today][id];
-      const s=readStudents().find(st=>st.id===id);
-      if(s && (gradeFilter.value==='all' || s.grade===gradeFilter.value)){
-        const li=document.createElement('li');
+      const s = readStudents().find(st=>st.id===id);
+      if(s && (gradeFilter.value==='all'||s.grade===gradeFilter.value)){
+        const record = att[today][id];
+
+        // Total acumulado
+        let totalLlegadas = 0;
+        Object.keys(att).forEach(day=>{
+          if(att[day][id]) totalLlegadas++;
+        });
+
+        const li = document.createElement('li');
         li.className='list-group-item flash';
-        li.textContent=`${index}. ${s.name} - ${s.grade} (${record.note})`;
+        li.textContent = `${index}. ${s.name} - ${s.grade} (${record.note})`;
+
+        // ALERTA VISUAL si 4 o más llegadas
+        if(totalLlegadas >= 4){
+          li.style.backgroundColor = '#f8d7da';
+          li.style.fontWeight = 'bold';
+          li.title = `Atención: ${s.name} tiene ${totalLlegadas} llegadas tarde`;
+        }
+
         ul.appendChild(li);
         index++; hasRecords=true;
         setTimeout(()=>li.classList.remove('flash'),400);
@@ -215,8 +241,6 @@ function renderChart(){
   const last5=getLast5Workdays();
   const labels=last5.map(d=>d.toLocaleDateString('es-ES',{weekday:'short',day:'2-digit'}));
   const att=readLateArrivals();
-  const students=readStudents();
-  const todayMonth=new Date().toISOString().slice(0,7);
   const data=last5.map(d=>{
     const dayKey=d.toISOString().slice(0,10);
     if(!att[dayKey]) return 0;
@@ -314,15 +338,30 @@ function showSummaryModal(){
       const s = students.find(st=>st.id===id);
       if(s && (gradeFilter.value==='all' || s.grade===gradeFilter.value)){
         const record = att[today][id];
+
+        // Total de llegadas acumuladas
+        let totalLlegadas = 0;
+        Object.keys(att).forEach(day=>{
+          if(att[day][id]) totalLlegadas++;
+        });
+
         const time = new Date(record.time).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${index++}</td><td>${s.name}</td><td>${s.grade}</td><td>${time}</td><td>${record.note}</td>`;
+        tr.innerHTML = `<td>${index++}</td><td>${s.name}</td><td>${s.grade}</td><td>${time}</td><td>${record.note}</td><td>${totalLlegadas}</td>`;
+
+        // ALERTA VISUAL si totalLlegadas >= 4
+        if(totalLlegadas >= 4){
+          tr.style.backgroundColor = '#f8d7da';
+          tr.style.fontWeight = 'bold';
+          tr.title = `Atención: ${s.name} tiene ${totalLlegadas} llegadas tarde`;
+        }
+
         tbody.appendChild(tr);
       }
     });
   } else {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="5" class="text-center text-muted">No hay llegadas hoy</td>`;
+    tr.innerHTML = `<td colspan="6" class="text-center text-muted">No hay llegadas hoy</td>`;
     tbody.appendChild(tr);
   }
 
@@ -342,7 +381,7 @@ function exportTodayPDF(){
   doc.setFontSize(14);
   doc.text(`Llegadas Tarde - ${today}`, 14, 20);
 
-  const tableCol = ["N°","Nombre","Grado","Hora","Nota"];
+  const tableCol = ["N°","Nombre","Grado","Hora","Nota","Total Llegadas"];
   const tableRows = [];
   let index = 1;
 
@@ -350,8 +389,10 @@ function exportTodayPDF(){
     const s = students.find(st=>st.id===id);
     if(s && (gradeFilter.value==='all' || s.grade===gradeFilter.value)){
       const record = att[today][id];
+      let totalLlegadas = 0;
+      Object.keys(att).forEach(day=>{ if(att[day][id]) totalLlegadas++; });
       const time = new Date(record.time).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
-      tableRows.push([index++, s.name, s.grade, time, record.note]);
+      tableRows.push([index++, s.name, s.grade, time, record.note, totalLlegadas]);
     }
   });
 
@@ -381,5 +422,6 @@ updateGradeFilter(); renderDashboard(); renderTodayList(); renderChart();
 </script>
 </body>
 </html>
+
 
 
