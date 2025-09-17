@@ -99,7 +99,7 @@ header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
 <script>
 // ------------------- STORAGE -------------------
 const STORAGE_STUDENTS='rs_students_v2';
-const STORAGE_ATT='late_attendance_v2';
+const STORAGE_ATT='late_attendance_v3';
 function readStudents(){ return JSON.parse(localStorage.getItem(STORAGE_STUDENTS)||'[]'); }
 function readLateArrivals(){ return JSON.parse(localStorage.getItem(STORAGE_ATT)||'{}'); }
 function writeLateArrivals(obj){ localStorage.setItem(STORAGE_ATT,JSON.stringify(obj)); }
@@ -131,9 +131,9 @@ function registerLateArrival(name, grade, note){
   const key = todayKey();
   if(!att[key]) att[key] = {};
 
-  if(att[key][student.id]) return 'alreadyToday'; // Ya registrado hoy
+  if(att[key][student.id] && note==='') return 'alreadyToday'; // Ya registrado hoy sin actualizar nota
 
-  att[key][student.id] = { time: new Date().toISOString(), note: note || '' };
+  att[key][student.id] = { time: att[key][student.id]?.time || new Date().toISOString(), note: note || att[key][student.id]?.note || '' };
   writeLateArrivals(att);
   renderDashboard(); renderTodayList(); renderChart();
   return student.name;
@@ -151,14 +151,18 @@ function renderDashboard(){
 
 // ------------------- Today list -------------------
 function renderTodayList(){
-  const ul=document.getElementById('todayStudents'); ul.innerHTML='';
+  const ul=document.getElementById('todayStudents'); 
+  ul.innerHTML='';
   const att=readLateArrivals();
   const today=todayKey();
+  let hasRecords=false;
+
   if(att[today]){
     let index=1;
     Object.keys(att[today]).forEach(id=>{
       const s=readStudents().find(st=>st.id===id);
-      if(s&&(gradeFilter.value==='all'||s.grade===gradeFilter.value)){
+      if(s && (gradeFilter.value==='all' || s.grade===gradeFilter.value)){
+        hasRecords=true;
         const record=att[today][id];
         const li=document.createElement('li');
         li.className='list-group-item flash';
@@ -168,6 +172,13 @@ function renderTodayList(){
         setTimeout(()=>li.classList.remove('flash'),400);
       }
     });
+  }
+
+  if(!hasRecords){
+    const li = document.createElement('li');
+    li.className='list-group-item text-center text-muted';
+    li.textContent = 'No hay llegadas hoy para este filtro';
+    ul.appendChild(li);
   }
 }
 
@@ -231,11 +242,21 @@ function scanLoop(){
         lastScan=now; let parsed=null;
         try{ parsed=JSON.parse(code.data); }catch(e){ parsed=null; }
         if(parsed && parsed.name && parsed.grade){
-          const note=prompt(`Estudiante: ${parsed.name}\nIngrese anotación:`, '');
-          const res=registerLateArrival(parsed.name, parsed.grade, note);
-          if(res==='notfound'){ scanStatus.textContent='Estudiante no encontrado'; speak('Estudiante no encontrado'); }
-          else if(res==='alreadyToday'){ scanStatus.textContent='Estudiante ya registrado hoy'; speak('Ya registrado hoy'); }
-          else{ scanStatus.textContent=`Registrado: ${res}`; speak(`Estudiante registrado: ${res}`); }
+          const res = registerLateArrival(parsed.name, parsed.grade, '');
+          if(res==='notfound'){ 
+            scanStatus.textContent='Estudiante no encontrado'; speak('Estudiante no encontrado'); 
+          }
+          else if(res==='alreadyToday'){ 
+            scanStatus.textContent='Estudiante ya registrado hoy'; speak('Ya registrado hoy'); 
+          }
+          else{ 
+            scanStatus.textContent=`Registrado: ${res}`; speak(`Estudiante registrado: ${res}`); 
+            // Ahora pedimos anotación
+            const note = prompt(`Agregar anotación para ${res}:`, '');
+            if(note){
+              registerLateArrival(parsed.name, parsed.grade, note);
+            }
+          }
         } else { scanStatus.textContent='QR inválido'; speak('QR inválido'); }
       }
     } else { scanStatus.textContent='Buscando QR...'; }
@@ -245,10 +266,10 @@ function scanLoop(){
 function speak(text){ const u=new SpeechSynthesisUtterance(text); window.speechSynthesis.speak(u); }
 
 // ------------------- Export PDF -------------------
-document.getElementById('exportPDF').addEventListener('click', ()=>{
+document.getElementById('exportPDF').addEventListener('click',()=>{
   const att = readLateArrivals();
   const today = todayKey();
-  if(!att[today]) { alert('No hay registros hoy'); return; }
+  if(!att[today]){ alert('No hay registros hoy'); return; }
 
   const students = readStudents();
   const { jsPDF } = window.jspdf;
@@ -260,11 +281,11 @@ document.getElementById('exportPDF').addEventListener('click', ()=>{
   const tableRows = [];
   let index = 1;
 
-  Object.keys(att[today]).forEach(id => {
-    const s = students.find(st => st.id === id);
-    if(s && (gradeFilter.value==='all' || s.grade === gradeFilter.value)){
+  Object.keys(att[today]).forEach(id=>{
+    const s = students.find(st=>st.id===id);
+    if(s && (gradeFilter.value==='all' || s.grade===gradeFilter.value)){
       const record = att[today][id];
-      const time = new Date(record.time).toLocaleTimeString('es-ES', {hour:'2-digit',minute:'2-digit'});
+      const time = new Date(record.time).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
       tableRows.push([index++, s.name, s.grade, time, record.note]);
     }
   });
