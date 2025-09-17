@@ -17,24 +17,19 @@
 
 <style>
 body { padding:1rem; background:#f4f6f9; }
-/* Encabezado */
 header { display:flex; align-items:center; justify-content:center; background: linear-gradient(90deg,#d32f2f,#1976d2,#388e3c); padding:12px 20px; border-radius:10px; margin-bottom:1rem; color:white; box-shadow:0 3px 6px rgba(0,0,0,0.2); }
 header img { height:65px; margin-right:15px; }
 header h2 { margin:0; font-size:1.4rem; }
 header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
-/* Video escáner */
 #video { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:8px; }
 .flash { animation: flashAnim 0.4s; }
 @keyframes flashAnim { 0%{background:#ffff99;}50%{background:#f4f6f9;}100%{background:#f4f6f9;} }
-/* Botones */
 #startScanner { border-color:#1976d2; color:#1976d2; }
 #stopScanner { border-color:#d32f2f; color:#d32f2f; }
 #exportPDFBtn { background-color:black; color:white; font-weight:bold; }
 #clearData { background-color:#d32f2f; color:white; }
-/* Dashboard */
 .card-red { border:2px solid #d32f2f; }
 .card-green { border:2px solid #388e3c; }
-/* Listados */
 .list-group-item { display:flex; justify-content:space-between; align-items:center; }
 </style>
 </head>
@@ -181,14 +176,18 @@ function renderTodayList(){
       if(s&&(gradeFilter.value==='all'||s.grade===gradeFilter.value)){
         let totalLlegadas = 0;
         Object.keys(att).forEach(day=>{ if(att[day][id]) totalLlegadas++; });
+
         const li=document.createElement('li');
         li.className='list-group-item flash';
         li.textContent=`${index}. ${s.name} - ${s.grade} (${record.note}) - Total llegadas: ${totalLlegadas}`;
+
         if(totalLlegadas>=4){
           li.style.backgroundColor='#f8d7da';
           li.style.fontWeight='bold';
-          li.title=`Atención: ${s.name} tiene ${totalLlegadas} llegadas tarde`;
+          li.style.color='#721c24';
+          li.title=`Atención: ${s.name} tiene ${totalLlegadas} llegadas tarde. Se recomienda citar al acudiente`;
         }
+
         ul.appendChild(li); 
         index++; 
         hasRecords=true;
@@ -241,6 +240,7 @@ const ctx2=canvas.getContext('2d');
 const scanStatus=document.getElementById('scanStatus');
 document.getElementById('startScanner').addEventListener('click',startScanner);
 document.getElementById('stopScanner').addEventListener('click',stopScanner);
+
 async function startScanner(){
   if(scanning) return;
   try{
@@ -252,9 +252,12 @@ async function startScanner(){
     scanLoop();
   }catch(err){ alert('No se pudo acceder a la cámara: '+err.message); }
 }
+
 function stopScanner(){ scanning=false; if(videoStream){ videoStream.getTracks().forEach(t=>t.stop()); videoStream=null; } document.getElementById('scanner-area').style.display='none'; scanStatus.textContent=''; }
+
 video.addEventListener('loadedmetadata',()=>{ video.style.height=video.offsetWidth+'px'; });
 let lastScan=0;
+
 function scanLoop(){
   if(!scanning) return;
   if(video.readyState===video.HAVE_ENOUGH_DATA){
@@ -268,20 +271,28 @@ function scanLoop(){
         lastScan=now; let parsed=null;
         try{ parsed=JSON.parse(code.data); }catch(e){ parsed=null; }
         if(parsed && parsed.name && parsed.grade){
-          // Voz inmediata del nombre
-          speak(`Estudiante: ${parsed.name}`);
-          // Prompt para anotación
-          const note=prompt(`Estudiante: ${parsed.name}\nIngrese anotación:`,'');
-          const res=registerLateArrival(parsed.name, parsed.grade, note);
-          if(res==='notfound'){ scanStatus.textContent='Estudiante no encontrado'; speak('Estudiante no encontrado'); }
-          else if(res==='alreadyToday'){ scanStatus.textContent='Ya registrado hoy'; speak('Estudiante ya registrado'); }
-          else{ scanStatus.textContent=`Registrado: ${res}`; }
+          const att=readLateArrivals();
+          const key=todayKey();
+          const students=readStudents();
+          const student=students.find(s=>s.name===parsed.name && s.grade===parsed.grade);
+          if(!student){ scanStatus.textContent='Estudiante no encontrado'; speak('Estudiante no encontrado'); return; }
+
+          if(att[key] && att[key][student.id]){
+            scanStatus.textContent='Ya registrado hoy';
+            speak('Estudiante ya registrado');
+            return; // No abrir prompt
+          }
+
+          speak(`Estudiante: ${student.name}`);
+          const note=prompt(`Estudiante: ${student.name}\nIngrese anotación:`,'');
+          registerLateArrival(student.name, student.grade, note);
         } else { scanStatus.textContent='QR inválido'; speak('QR inválido'); }
       }
     } else { scanStatus.textContent='Buscando QR...'; }
   }
   requestAnimationFrame(scanLoop);
 }
+
 function speak(text){ const u=new SpeechSynthesisUtterance(text); window.speechSynthesis.speak(u); }
 
 // ------------------- Modal resumen / Export PDF -------------------
