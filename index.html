@@ -17,25 +17,25 @@
 
 <style>
 body { padding:1rem; background:#f4f6f9; }
+/* Encabezado */
 header { display:flex; align-items:center; justify-content:center; background: linear-gradient(90deg,#d32f2f,#1976d2,#388e3c); padding:12px 20px; border-radius:10px; margin-bottom:1rem; color:white; box-shadow:0 3px 6px rgba(0,0,0,0.2); }
 header img { height:65px; margin-right:15px; }
 header h2 { margin:0; font-size:1.4rem; }
 header h3 { margin:0; font-size:1rem; font-weight:normal; opacity:0.9; }
-
+/* Video escáner */
 #video { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:8px; }
 .flash { animation: flashAnim 0.4s; }
 @keyframes flashAnim { 0%{background:#ffff99;}50%{background:#f4f6f9;}100%{background:#f4f6f9;} }
-
-.label { border:3px dashed #d32f2f; padding:6px; margin:6px; display:inline-flex; flex-direction:column; align-items:center; width:30%; border-radius:8px; background:white; }
-.label .label-name { margin-top:6px; font-size:13px; text-align:center; color:#d32f2f; font-weight:bold; }
-
-button { font-weight:bold; }
-
+/* Botones */
 #startScanner { border-color:#1976d2; color:#1976d2; }
 #stopScanner { border-color:#d32f2f; color:#d32f2f; }
 #exportPDF { background-color:black; color:white; font-weight:bold; }
-
-#manualStudentForm { border:2px solid #388e3c; padding:10px; border-radius:8px; background:#fff; display:none; margin-bottom:1rem; }
+#clearData { background-color:#d32f2f; color:white; }
+/* Dashboard */
+.card-red { border:2px solid #d32f2f; }
+.card-green { border:2px solid #388e3c; }
+/* Listados */
+.list-group-item { display:flex; justify-content:space-between; align-items:center; }
 </style>
 </head>
 
@@ -43,17 +43,18 @@ button { font-weight:bold; }
 <header>
   <img src="logo_colegio.png" alt="Logo Colegio">
   <div>
-    <h2>Control de Llegadas Tardes</h2>
     <h2>IE Baldomero Sanín Cano</h2>
-    <h3>Diseñó: Uv@profe</h3>
+    <h2>Control de Llegadas Tardes</h2>
+    <h3>Diseño: Uv@profe</h3>
   </div>
 </header>
 
 <div class="container">
 <div class="row g-3">
+
   <div class="col-lg-4">
     <!-- Escáner QR -->
-    <div class="card mb-3">
+    <div class="card card-green mb-3">
       <div class="card-body">
         <h5>Escáner QR</h5>
         <div id="scanner-controls" class="mb-2">
@@ -77,12 +78,12 @@ button { font-weight:bold; }
     </div>
 
     <!-- Dashboard -->
-    <div class="card mb-3">
+    <div class="card card-red mb-3">
       <div class="card-body">
         <h5>Dashboard (tiempo real)</h5>
         <p>Total estudiantes: <strong id="totalStudents">0</strong></p>
-        <p>Llegadas tarde hoy (<span id="todayDate"></span>): <strong id="attToday">0</strong></p>
-        <p>Llegadas tarde totales: <strong id="attTotal">0</strong></p>
+        <p>Llegadas hoy (<span id="todayDate"></span>): <strong id="attToday">0</strong></p>
+        <p>Llegadas totales: <strong id="attTotal">0</strong></p>
         <canvas id="attendanceChart" style="width:100%; height:200px;"></canvas>
         <button id="clearData" class="btn btn-sm mt-2">Borrar toda la base (local)</button>
       </div>
@@ -97,10 +98,9 @@ button { font-weight:bold; }
 
 <script>
 // ------------------- STORAGE -------------------
-const STORAGE_STUDENTS='lt_students';
-const STORAGE_ATT='lt_attendance';
+const STORAGE_STUDENTS='rs_students_v2';
+const STORAGE_ATT='late_attendance_v1';
 function readStudents(){ return JSON.parse(localStorage.getItem(STORAGE_STUDENTS)||'[]'); }
-function writeStudents(arr){ localStorage.setItem(STORAGE_STUDENTS,JSON.stringify(arr)); }
 function readAttendance(){ return JSON.parse(localStorage.getItem(STORAGE_ATT)||'{}'); }
 function writeAttendance(obj){ localStorage.setItem(STORAGE_ATT,JSON.stringify(obj)); }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
@@ -122,54 +122,58 @@ function updateGradeFilter(){
 gradeFilter.addEventListener('change',()=>{ renderTodayList(); renderChart(); });
 
 // ------------------- Attendance -------------------
-function registerLateQR(name, grade, note=''){
+function registerLateAttendanceQR(name, grade){
   const students=readStudents();
   const student=students.find(s=>s.name===name && s.grade===grade);
   if(!student) return 'notfound';
-  const att=readAttendance(); const key=todayKey();
-  if(!att[key]) att[key]={};
-  if(!att[key][student.id]) att[key][student.id]=[];
-  att[key][student.id].push({time:new Date().toISOString(), note});
-  writeAttendance(att);
-  renderDashboard(); renderTodayList(); renderChart();
-
-  // Alerta por 4 o más llegadas en el mes
-  let monthCount=0;
-  Object.keys(att).forEach(d=>{
-    if(d.startsWith(todayKey().slice(0,7))){
-      if(att[d][student.id]) monthCount+=att[d][student.id].length;
+  const att=readAttendance(); 
+  const monthKey=new Date().toISOString().slice(0,7); // YYYY-MM
+  if(!att[monthKey]) att[monthKey]={};
+  if(!att[monthKey][student.id]) att[monthKey][student.id]=[];
+  if(att[monthKey][student.id].length>=0){
+    const note=prompt(`Estudiante: ${student.name}\nIngrese anotación:`,'');
+    att[monthKey][student.id].push({timestamp:new Date().toISOString(), note});
+    writeAttendance(att);
+    renderDashboard(); renderTodayList(); renderChart();
+    if(att[monthKey][student.id].length>=4){
+      speak(`Este estudiante necesita que se le cite acudiente, ya lleva ${att[monthKey][student.id].length} llegadas tardes`);
     }
-  });
-  if(monthCount>=4){
-    speak(`Este estudiante necesita que se le cite acudiente. Ya lleva ${monthCount} llegadas tardes.`);
+    return student.name;
   }
-  return student.name;
 }
 
 // ------------------- Dashboard -------------------
 function renderDashboard(){
   const students=readStudents();
-  const att=readAttendance(); const today=todayKey();
+  const att=readAttendance(); 
+  const today=todayKey();
+  const monthKey=today.slice(0,7);
   totalStudentsEl.textContent=students.length;
-  attTodayEl.textContent=att[today]?Object.keys(att[today]).length:0;
-  attTotalEl.textContent=Object.values(att).reduce((s,o)=>s+Object.keys(o).length,0);
+  attTodayEl.textContent=att[monthKey]?Object.values(att[monthKey]).reduce((sum,a)=>sum+a.length,0):0;
+  attTotalEl.textContent=att[monthKey]?Object.values(att[monthKey]).reduce((sum,a)=>sum+a.length,0):0;
 }
 
 // ------------------- Today list -------------------
 function renderTodayList(){
-  const att=readAttendance();
-  const today=todayKey();
   const ul=document.getElementById('todayStudents'); ul.innerHTML='';
-  if(att[today]){
-    const students=readStudents(); let index=1;
-    Object.keys(att[today]).forEach(id=>{
-      const s=students.find(st=>st.id===id);
-      if(s&&(gradeFilter.value==='all'||gradeFilter.value===s.grade)){
-        const li=document.createElement('li');
-        li.className='list-group-item flash';
-        li.textContent=`${index}. ${s.name} - ${s.grade} (${att[today][id].length} llegadas)`;
-        ul.appendChild(li); index++;
-        setTimeout(()=>li.classList.remove('flash'),400);
+  const att=readAttendance(); 
+  const today=todayKey();
+  const monthKey=today.slice(0,7);
+  if(att[monthKey]){
+    let index=1;
+    Object.keys(att[monthKey]).forEach(id=>{
+      const records=att[monthKey][id].filter(r=>r.timestamp.slice(0,10)===today);
+      if(records.length>0){
+        const s=readStudents().find(st=>st.id===id);
+        if(s&&(gradeFilter.value==='all'||gradeFilter.value===s.grade)){
+          records.forEach(rec=>{
+            const li=document.createElement('li');
+            li.className='list-group-item flash';
+            li.textContent=`${index}. ${s.name} - ${s.grade} (${rec.note})`;
+            ul.appendChild(li); index++;
+            setTimeout(()=>li.classList.remove('flash'),400);
+          });
+        }
       }
     });
   }
@@ -192,19 +196,15 @@ function renderChart(){
   const labels=last5.map(d=>d.toLocaleDateString('es-ES',{weekday:'short',day:'2-digit'}));
   const att=readAttendance();
   const students=readStudents();
+  const monthKey=new Date().toISOString().slice(0,7);
   const data=last5.map(d=>{
-    const key=d.toISOString().slice(0,10);
-    if(!att[key]) return 0;
-    if(gradeFilter.value==='all') return Object.keys(att[key]).length;
-    else return Object.keys(att[key]).filter(id=>{
-      const s=students.find(st=>st.id===id);
-      return s && s.grade===gradeFilter.value;
-    }).length;
+    const dayKey=d.toISOString().slice(0,10);
+    if(!att[monthKey]) return 0;
+    return Object.values(att[monthKey]).reduce((sum,a)=>sum+a.filter(r=>r.timestamp.slice(0,10)===dayKey).length,0);
   });
   if(attendanceChart) attendanceChart.destroy();
   attendanceChart=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Llegadas Tarde',data,backgroundColor:'#1976d2'}]}});
 }
-renderChart();
 
 // ------------------- Scanner -------------------
 let videoStream=null, scanning=false;
@@ -241,8 +241,7 @@ function scanLoop(){
         lastScan=now; let parsed=null;
         try{ parsed=JSON.parse(code.data); }catch(e){ parsed=null; }
         if(parsed && parsed.name && parsed.grade){
-          const note=prompt(`Anotación para ${parsed.name} (${parsed.grade}):`) || '';
-          const res=registerLateQR(parsed.name, parsed.grade, note);
+          const res=registerLateAttendanceQR(parsed.name, parsed.grade);
           if(res==='notfound'){ scanStatus.textContent='Estudiante no encontrado'; speak('Estudiante no encontrado'); }
           else{ scanStatus.textContent=`Registrado: ${res}`; speak(`Estudiante registrado: ${res}`); }
         } else { scanStatus.textContent='QR inválido'; speak('QR inválido'); }
@@ -253,28 +252,43 @@ function scanLoop(){
 }
 function speak(text){ const u=new SpeechSynthesisUtterance(text); window.speechSynthesis.speak(u); }
 
-// ------------------- Clear data -------------------
-document.getElementById('clearData').addEventListener('click',()=>{
-  if(confirm('Borrar estudiantes y llegadas tarde?')){
-    localStorage.removeItem(STORAGE_STUDENTS);
-    localStorage.removeItem(STORAGE_ATT);
-    updateGradeFilter(); renderDashboard(); renderTodayList(); renderChart();
-  }
+// ------------------- Export PDF -------------------
+document.getElementById('exportPDF').addEventListener('click',()=>{
+  const att=readAttendance();
+  const monthKey=new Date().toISOString().slice(0,7);
+  if(!att[monthKey]){ alert('No hay registros este mes'); return; }
+  const students=readStudents();
+  const { jsPDF } = window.jspdf;
+  const doc=new jsPDF();
+  doc.setFontSize(14);
+  doc.text(`Llegadas Tarde - ${monthKey}`,14,20);
+  const tableCol=["N°","Nombre","Grado","Fecha","Anotación"];
+  const tableRows=[];
+  let index=1;
+  Object.keys(att[monthKey]).forEach(id=>{
+    const s=students.find(st=>st.id===id);
+    if(s){
+      att[monthKey][id].forEach(r=>{
+        const dateReg=new Date(r.timestamp).toLocaleDateString('es-ES',{day:'2-digit', month:'long', year:'numeric'});
+        tableRows.push([index++, s.name, s.grade, dateReg, r.note]);
+      });
+    }
+  });
+  doc.autoTable({head:[tableCol],body:tableRows,startY:30,styles:{cellPadding:2,fontSize:12,halign:'left',valign:'middle'},theme:'grid'});
+  doc.save(`LlegadasTarde_${monthKey}.pdf`);
 });
 
-// ------------------- Demo students -------------------
-if(readStudents().length===0){
-  const sample=[
-    {id:uid(),name:'Carlos Pérez',grade:'10-1',createdAt:new Date().toISOString()},
-    {id:uid(),name:'María Gómez',grade:'9-2',createdAt:new Date().toISOString()},
-    {id:uid(),name:'Juan Rodríguez',grade:'11-3',createdAt:new Date().toISOString()},
-    {id:uid(),name:'Ana Morales',grade:'10-2',createdAt:new Date().toISOString()}
-  ]; writeStudents(sample);
-}
+// ------------------- Clear data -------------------
+document.getElementById('clearData').addEventListener('click',()=>{
+  if(confirm('Borrar registros de llegadas tarde?')){ localStorage.removeItem(STORAGE_ATT); renderDashboard(); renderTodayList(); renderChart(); }
+});
+
+// ------------------- Demo init -------------------
 updateGradeFilter(); renderDashboard(); renderTodayList(); renderChart();
 </script>
 </body>
 </html>
+
 
 
 
